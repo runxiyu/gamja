@@ -437,6 +437,9 @@ export default class App extends Component {
 					clientSecret: this.config.oauth2.client_secret,
 				});
 				username = data.username;
+				if (!username) {
+					console.warn("Username missing from OAuth 2.0 token introspection response");
+				}
 			} catch (err) {
 				console.warn("Failed to introspect OAuth 2.0 token:", err);
 			}
@@ -493,7 +496,9 @@ export default class App extends Component {
 
 		let stored = this.bufferStore.get({ name, server: client.params });
 		if (client.caps.enabled.has("draft/chathistory") && stored) {
-			this.setBufferState({ server: serverID, name }, { unread: stored.unread });
+			this.setBufferState({ server: serverID, name }, { unread: stored.unread }, () => {
+				this.updateDocumentTitle();
+			});
 		}
 
 		this.bufferStore.put({
@@ -541,13 +546,9 @@ export default class App extends Component {
 			let client = this.clients.get(buf.server);
 			let stored = this.bufferStore.get({ name: buf.name, server: client.params });
 			let prevReadReceipt = getReceipt(stored, ReceiptType.READ);
-			// TODO: only mark as read if user scrolled at the bottom
-			let update = State.updateBuffer(state, buf.id, {
-				unread: Unread.NONE,
-				prevReadReceipt,
-			});
+			let update = State.updateBuffer(state, buf.id, { prevReadReceipt });
 
-			return { ...update, activeBuffer: buf.id };
+			return { activeBuffer: buf.id, ...update };
 		}, () => {
 			if (!buf) {
 				return;
@@ -555,6 +556,35 @@ export default class App extends Component {
 
 			if (this.buffer.current) {
 				this.buffer.current.focus();
+			}
+
+			let server = this.state.servers.get(buf.server);
+			if (buf.type === BufferType.NICK && !server.users.has(buf.name)) {
+				this.whoUserBuffer(buf.name, buf.server);
+			}
+
+			if (buf.type === BufferType.CHANNEL && !buf.hasInitialWho) {
+				this.whoChannelBuffer(buf.name, buf.server);
+			}
+
+			this.updateDocumentTitle();
+		});
+
+		// TODO: only mark as read if user scrolled at the bottom
+		this.markBufferAsRead(id);
+	}
+
+	markBufferAsRead(id) {
+		let buf;
+		this.setState((state) => {
+			buf = State.getBuffer(state, id);
+			if (!buf) {
+				return;
+			}
+			return State.updateBuffer(state, buf.id, { unread: Unread.NONE });
+		}, () => {
+			if (!buf) {
+				return;
 			}
 
 			let client = this.clients.get(buf.server);
@@ -578,21 +608,44 @@ export default class App extends Component {
 				}
 			}
 
-			let server = this.state.servers.get(buf.server);
-			if (buf.type === BufferType.NICK && !server.users.has(buf.name)) {
-				this.whoUserBuffer(buf.name, buf.server);
-			}
-
-			if (buf.type === BufferType.CHANNEL && !buf.hasInitialWho) {
-				this.whoChannelBuffer(buf.name, buf.server);
-			}
-
-			if (buf.type !== BufferType.SERVER) {
-				document.title = buf.name + ' · ' + this.baseTitle;
-			} else {
-				document.title = this.baseTitle;
-			}
+			this.updateDocumentTitle();
 		});
+	}
+
+	updateDocumentTitle() {
+		let buf = State.getBuffer(this.state, this.state.activeBuffer);
+		let server;
+		if (buf) {
+			server = this.state.servers.get(buf.server);
+		}
+		let bouncerNetwork;
+		if (server.bouncerNetID) {
+			bouncerNetwork = this.state.bouncerNetworks.get(server.bouncerNetID);
+		}
+
+		let numUnread = 0;
+		for (let buffer of this.state.buffers.values()) {
+			if (Unread.compare(buffer.unread, Unread.HIGHLIGHT) >= 0) {
+				numUnread++;
+			}
+		}
+
+		let parts = [];
+		if (buf && buf.type !== BufferType.SERVER) {
+			parts.push(buf.name);
+		}
+		if (bouncerNetwork) {
+			parts.push(getServerName(server, bouncerNetwork));
+		}
+		parts.push(this.baseTitle);
+
+		let title = "";
+		if (numUnread > 0) {
+			title = `(${numUnread}) `;
+		}
+		title += parts.join(" · ");
+
+		document.title = title;
 	}
 
 	prepareChatMessage(serverID, msg) {
@@ -719,7 +772,7 @@ export default class App extends Component {
 			let prevReadReceipt = buf.prevReadReceipt;
 			let receipts = { [ReceiptType.DELIVERED]: receiptFromMessage(msg) };
 
-			if (this.state.activeBuffer !== buf.id) {
+			if (this.state.activeBuffer !== buf.id || !document.hasFocus()) {
 				unread = Unread.union(unread, msgUnread);
 			} else {
 				receipts[ReceiptType.READ] = receiptFromMessage(msg);
@@ -740,6 +793,10 @@ export default class App extends Component {
 				this.sendReadReceipt(client, stored);
 			}
 			return { unread, prevReadReceipt };
+		}, () => {
+			if (msgUnread === Unread.HIGHLIGHT) {
+				this.updateDocumentTitle();
+			}
 		});
 	}
 
@@ -849,6 +906,12 @@ export default class App extends Component {
 		let client = this.clients.get(serverID);
 		let chatHistoryBatch = irc.findBatchByType(msg, "chathistory");
 
+		// Reply triggered by some command sent by us, not worth displaying to
+		// the user
+		if (msg.internal) {
+			return [];
+		}
+
 		let target, channel, affectedBuffers;
 		switch (msg.command) {
 		case "MODE":
@@ -873,6 +936,14 @@ export default class App extends Component {
 				}
 			}
 
+			let allowedPrefixes = client.isupport.statusMsg();
+			if (allowedPrefixes) {
+				let parts = irc.parseTargetPrefix(target, allowedPrefixes);
+				if (client.isChannel(parts.name)) {
+					target = parts.name;
+				}
+			}
+
 			// Don't open a new buffer if this is just a NOTICE or a garbage
 			// CTCP message
 			let openNewBuffer = true;
@@ -888,13 +959,6 @@ export default class App extends Component {
 				target = SERVER_BUFFER;
 			}
 
-			let allowedPrefixes = client.isupport.statusMsg();
-			if (allowedPrefixes) {
-				let parts = irc.parseTargetPrefix(target, allowedPrefixes);
-				if (client.isChannel(parts.name)) {
-					target = parts.name;
-				}
-			}
 			return [target];
 		case "JOIN":
 			channel = msg.params[0];
@@ -1210,6 +1274,7 @@ export default class App extends Component {
 					closed,
 					receipts: { [ReceiptType.READ]: readReceipt },
 				});
+				this.updateDocumentTitle();
 			});
 			break;
 		default:
@@ -1922,6 +1987,11 @@ export default class App extends Component {
 	}
 
 	handleWindowFocus() {
+		if (this.state.activeBuffer) {
+			// TODO: only do this if scrolled at the bottom
+			this.markBufferAsRead(this.state.activeBuffer);
+		}
+
 		// When the user focuses gamja, send a PING to make sure we detect any
 		// network errors ASAP
 
@@ -1965,6 +2035,11 @@ export default class App extends Component {
 			if (bouncerNetID) {
 				activeBouncerNetwork = this.state.bouncerNetworks.get(bouncerNetID);
 			}
+		}
+
+		let activeClient = null;
+		if (activeBuffer) {
+			activeClient = this.clients.get(activeBuffer.server);
 		}
 
 		if (this.state.connectForm) {
@@ -2208,6 +2283,7 @@ export default class App extends Component {
 			${memberList}
 			<${Composer}
 				ref=${this.composer}
+				client=${activeClient}
 				readOnly=${composerReadOnly}
 				onSubmit=${this.handleComposerSubmit}
 				autocomplete=${this.autocomplete}

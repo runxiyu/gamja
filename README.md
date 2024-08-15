@@ -1,3 +1,11 @@
+This is a soft fork of the [gamja](https://codeberg.org/emersion/gamja) IRC web
+client. We made a few small changes for the [rx](https://irc.runxiyu.org) IRC
+network. A public instance is available at <https://gamja.irc.andrewyu.org>.
+
+The upstream README is below.
+
+---
+
 # [gamja]
 
 A simple IRC web client.

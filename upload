@@ -4,4 +4,6 @@ set -eux
 
 npm run build
 
+cp config.json dist/
+
 rsync --verbose --chmod=644 --recursive --delete-after dist/ root@andrewyu.org:/var/www/gamja/gamja/

@@ -1,0 +1,6 @@
+{
+	"server": {
+		"autojoin": "#chat,#support",
+		"nick": "webirc-*"
+	}
+}

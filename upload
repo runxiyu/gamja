@@ -1,0 +1,7 @@
+#!/bin/sh
+
+set -eux
+
+npm run build
+
+rsync --verbose --chmod=644 --recursive --delete-after dist/ root@andrewyu.org:/var/www/gamja/gamja/

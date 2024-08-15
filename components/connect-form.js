@@ -115,7 +115,7 @@ export default class ConnectForm extends Component {
 		if (this.props.auth !== "disabled" && this.props.auth !== "external" && this.props.auth !== "oauth2") {
 			auth = html`
 				<label>
-					Password:<br/>
+					Password (SASL):<br/>
 					<input
 						type="password"
 						name="password"
@@ -148,7 +148,7 @@ export default class ConnectForm extends Component {
 
 		return html`
 			<form onInput=${this.handleInput} onSubmit=${this.handleSubmit}>
-				<h2>Connect to rx</h2>
+				<h2>Connect to the rx IRC network</h2>
 
 				<label>
 					Nickname:<br/>

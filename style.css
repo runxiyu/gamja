@@ -55,7 +55,7 @@ body {
 	display: grid;
 	grid-template-rows: auto 1fr max-content;
 	grid-template-columns: max-content 1fr max-content;
-	font-family: monospace;
+	font-family: "DejaVu Sans Mono", "Menlo", "SF Mono", monospace, "Courier";
 }
 
 noscript {
@@ -559,7 +559,7 @@ kbd {
 	text-align: center;
 	white-space: nowrap;
 	padding: 2px 4px;
-	font-family: monospace;
+	font-family: "DejaVu Sans Mono", "Menlo", "SF Mono", monospace;
 	border-radius: 3px;
 }
 
